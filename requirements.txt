@@ -1,0 +1,6 @@
+Flask==3.0.0
+Werkzeug==3.0.1
+pdfminer.six==20221105
+groq==0.4.2
+gunicorn==21.2.0
+requests==2.31.0
