@@ -183,7 +183,7 @@ Return this EXACT JSON structure:
 }}"""
 
     try:
-        client = Groq(api_key=GROQ_API_KEY)
+        client = Groq()
         
         response = client.chat.completions.create(
             model=MODEL_NAME,
