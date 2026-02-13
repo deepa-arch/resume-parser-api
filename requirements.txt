@@ -1,8 +1,7 @@
-Flask==3.0.0
-Werkzeug==3.0.1
-pdfminer.six==20221105
-groq>=0.9.0
-httpx>=0.27.0
-
-gunicorn==21.2.0
-requests==2.31.0
+Flask
+Werkzeug
+pdfminer.six
+python-docx
+groq
+gunicorn
+requests
