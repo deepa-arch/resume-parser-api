@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# app.py - Flask Resume Parser API
-
 import os
 import re
 import json
@@ -8,8 +5,8 @@ import logging
 from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
 from pdfminer.high_level import extract_text as pdf_extract
+from docx import Document
 from groq import Groq
-import subprocess
 
 app = Flask(__name__)
 
@@ -17,70 +14,68 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 ALLOWED_EXTENSIONS = {"pdf", "txt", "doc", "docx"}
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16MB max file size
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Get API key from environment variable
+# Get API key from environment
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 MODEL_NAME = "llama-3.3-70b-versatile"
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
 def allowed_file(filename):
-    """Check if file extension is allowed"""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def clean_text(text):
-    """Clean extracted text"""
     if not text:
         return ""
     text = "\n".join([line.strip() for line in text.splitlines() if line.strip()])
     return text
 
-def convert_to_pdf(doc_path):
-    """Convert DOC/DOCX to PDF using LibreOffice"""
-    pdf_path = doc_path.rsplit(".", 1)[0] + ".pdf"
+def extract_text_from_docx(file_path):
+    """Extract text from DOCX file using python-docx"""
     try:
-        if os.path.exists(pdf_path):
-            return pdf_path
-
-        result = subprocess.run([
-            "libreoffice", "--headless", "--convert-to", "pdf", doc_path,
-            "--outdir", os.path.dirname(doc_path)
-        ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
-
-        if os.path.exists(pdf_path):
-            return pdf_path
+        doc = Document(file_path)
+        full_text = []
+        
+        # Extract text from paragraphs
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip():
+                full_text.append(paragraph.text)
+        
+        # Extract text from tables
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    if cell.text.strip():
+                        full_text.append(cell.text)
+        
+        return "\n".join(full_text)
     except Exception as e:
-        logging.error(f"Error converting to PDF: {e}")
-    return None
+        logging.error(f"DOCX extraction error: {e}")
+        return ""
 
 def extract_text_from_file(file_path):
-    """Extract text from PDF, DOC, DOCX, or TXT files"""
+    """Extract text from PDF, DOCX, or TXT files"""
     ext = file_path.rsplit(".", 1)[1].lower()
     
     try:
         if ext == "pdf":
             text = pdf_extract(file_path)
-            if text.strip():
-                return clean_text(text)
-            return ""
-
+            return clean_text(text) if text.strip() else ""
+            
+        elif ext in ["doc", "docx"]:
+            # Use python-docx directly (no LibreOffice needed!)
+            text = extract_text_from_docx(file_path)
+            return clean_text(text) if text.strip() else ""
+            
         elif ext == "txt":
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 return clean_text(f.read().strip())
-
-        elif ext in ["doc", "docx"]:
-            pdf_path = convert_to_pdf(file_path)
-            if pdf_path:
-                text = pdf_extract(pdf_path)
-                return clean_text(text)
-            return ""
-            
+                
     except Exception as e:
         logging.error(f"Text extraction error: {e}")
     
@@ -92,124 +87,77 @@ def parse_resume_with_ai(resume_text):
     if not GROQ_API_KEY:
         return {"error": "GROQ_API_KEY not configured"}
     
-    prompt = f"""You are an expert resume parser. Extract ALL information from the following resume and return it as a structured JSON object.
+    prompt = f"""Extract information from this resume as JSON.
 
-CRITICAL INSTRUCTIONS:
-- Return ONLY valid JSON, no markdown, no explanation
-- Use null for missing fields
-- Extract everything you find
+Resume:
+{resume_text[:4000]}
 
-Resume Text:
-{resume_text}
-
-Return this EXACT JSON structure:
+Return ONLY valid JSON with these fields:
 {{
   "personal_info": {{
-    "first_name": "string or null",
-    "last_name": "string or null",
-    "email": "string or null",
-    "phone": "string or null",
-    "location": "string or null",
-    "linkedin": "string or null",
-    "github": "string or null",
-    "portfolio": "string or null",
-    "summary": "string or null"
+    "first_name": null,
+    "last_name": null,
+    "email": null,
+    "phone": null,
+    "location": null,
+    "linkedin": null,
+    "github": null
   }},
   "education": [
     {{
-      "degree": "string or null",
-      "field_of_study": "string or null",
-      "institution": "string or null",
-      "location": "string or null",
-      "start_date": "string or null",
-      "end_date": "string or null",
-      "grade": "string or null"
+      "degree": null,
+      "field_of_study": null,
+      "institution": null,
+      "start_date": null,
+      "end_date": null,
+      "grade": null
     }}
   ],
   "experience": [
     {{
-      "job_title": "string or null",
-      "company": "string or null",
-      "location": "string or null",
-      "start_date": "string or null",
-      "end_date": "string or null",
-      "responsibilities": ["string"],
-      "achievements": ["string"],
-      "technologies": ["string"]
+      "job_title": null,
+      "company": null,
+      "start_date": null,
+      "end_date": null,
+      "responsibilities": []
     }}
   ],
   "projects": [
     {{
-      "name": "string or null",
-      "description": "string or null",
-      "role": "string or null",
-      "technologies": ["string"],
-      "link": "string or null"
+      "name": null,
+      "description": null,
+      "technologies": []
     }}
   ],
   "skills": {{
-    "technical_skills": ["string"],
-    "programming_languages": ["string"],
-    "frameworks": ["string"],
-    "tools": ["string"],
-    "databases": ["string"],
-    "soft_skills": ["string"]
+    "technical_skills": [],
+    "programming_languages": [],
+    "frameworks": [],
+    "tools": []
   }},
-  "certifications": [
-    {{
-      "name": "string or null",
-      "issuer": "string or null",
-      "date": "string or null",
-      "credential_id": "string or null"
-    }}
-  ],
-  "hackathons": [
-    {{
-      "name": "string or null",
-      "organizer": "string or null",
-      "date": "string or null",
-      "achievement": "string or null",
-      "project": "string or null"
-    }}
-  ],
-  "awards": [
-    {{
-      "name": "string or null",
-      "issuer": "string or null",
-      "date": "string or null",
-      "description": "string or null"
-    }}
-  ]
+  "certifications": [],
+  "hackathons": []
 }}"""
 
     try:
-        client = Groq()
+        client = Groq(api_key=GROQ_API_KEY)
         
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert resume parser. Always return valid JSON only."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
+                {"role": "system", "content": "You are a resume parser. Return only valid JSON."},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.1,
-            max_tokens=4000
+            max_tokens=3000
         )
         
         content = response.choices[0].message.content
-        
-        # Clean response
         content = re.sub(r'^```json\s*', '', content)
         content = re.sub(r'^```\s*', '', content)
         content = re.sub(r'\s*```$', '', content)
         content = content.strip()
         
-        # Extract JSON
         json_match = re.search(r'\{.*\}', content, re.DOTALL)
         if json_match:
             content = json_match.group()
@@ -217,16 +165,12 @@ Return this EXACT JSON structure:
         parsed = json.loads(content)
         return parsed
         
-    except json.JSONDecodeError as e:
-        logging.error(f"JSON parsing error: {e}")
-        return {"error": "Failed to parse JSON response", "details": str(e)}
     except Exception as e:
         logging.error(f"API error: {e}")
         return {"error": str(e)}
 
 @app.route("/", methods=["GET"])
 def index():
-    """API documentation endpoint"""
     return jsonify({
         "service": "Resume Parser API",
         "version": "1.0.0",
@@ -235,23 +179,17 @@ def index():
             "/parse": {
                 "method": "POST",
                 "description": "Upload and parse resume",
-                "content_type": "multipart/form-data",
-                "parameters": {
-                    "file": "Resume file (PDF, TXT, DOC, DOCX)"
-                },
-                "max_file_size": "16MB"
+                "supported_formats": ["pdf", "txt", "doc", "docx"]
             },
             "/health": {
                 "method": "GET",
-                "description": "Health check endpoint"
+                "description": "Health check"
             }
-        },
-        "supported_formats": list(ALLOWED_EXTENSIONS)
+        }
     }), 200
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Health check endpoint"""
     return jsonify({
         "status": "healthy",
         "groq_api_configured": bool(GROQ_API_KEY),
@@ -260,9 +198,7 @@ def health():
 
 @app.route("/parse", methods=["POST"])
 def parse_resume():
-    """Parse uploaded resume"""
     try:
-        # Check if file is present
         if "file" not in request.files:
             return jsonify({"error": "No file provided"}), 400
 
@@ -277,13 +213,11 @@ def parse_resume():
                 "allowed_types": list(ALLOWED_EXTENSIONS)
             }), 400
 
-        # Save file
         filename = secure_filename(file.filename)
         file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
         file.save(file_path)
         logging.info(f"File saved: {file_path}")
 
-        # Extract text
         resume_text = extract_text_from_file(file_path)
         
         if not resume_text:
@@ -291,20 +225,14 @@ def parse_resume():
 
         logging.info(f"Extracted {len(resume_text)} characters")
 
-        # Parse with AI
         parsed_data = parse_resume_with_ai(resume_text)
 
-        # Clean up file
+        # Clean up
         try:
             os.remove(file_path)
-            if file_path.endswith(('.doc', '.docx')):
-                pdf_path = file_path.rsplit(".", 1)[0] + ".pdf"
-                if os.path.exists(pdf_path):
-                    os.remove(pdf_path)
-        except Exception as e:
-            logging.warning(f"Failed to clean up files: {e}")
+        except:
+            pass
 
-        # Return result
         return jsonify({
             "status": "success",
             "data": parsed_data,
@@ -315,12 +243,12 @@ def parse_resume():
         }), 200
 
     except Exception as e:
-        logging.error(f"Error processing resume: {e}")
+        logging.error(f"Error: {e}")
         return jsonify({
             "error": "Internal server error",
             "message": str(e)
         }), 500
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
