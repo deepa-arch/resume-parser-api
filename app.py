@@ -90,7 +90,7 @@ def parse_resume_with_ai(resume_text):
     prompt = f"""Extract information from this resume as JSON.
 
 Resume:
-{resume_text[:4000]}
+{resume_text[:12000]}
 
 Return ONLY valid JSON with these fields:
 {{
@@ -145,7 +145,16 @@ Return ONLY valid JSON with these fields:
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": "You are a resume parser. Return only valid JSON."},
+                {"role": "system", "content": (
+    "You are a resume parser. Follow these rules strictly:\n"
+    "- Extract ALL job experiences from the resume, not just the first one\n"
+    "- Extract ALL education entries\n"
+    "- Extract ALL projects listed\n"
+    "- For each experience entry, only include responsibilities specific to that job\n"
+    "- Use the exact dates mentioned in the resume for start_date and end_date\n"
+    "- If a field is genuinely missing, use null\n"
+    "- Return only valid JSON with no explanation, preamble, or markdown formatting"
+)},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
